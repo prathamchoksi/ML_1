@@ -121,26 +121,29 @@ def information_gain(Y: pd.Series, attr: pd.Series, criterion: str, threshold: O
 
 
 
-def opt_split_attribute(X: pd.DataFrame, y: pd.Series, criterion: str, features: pd.Series):
+def opt_split_attribute(X: pd.DataFrame, y: pd.Series, criterion: str):
     """
-    Find the optimal attribute (and threshold if continuous) to split upon.
-    Works for both discrete and continuous inputs and discrete/continuous outputs.
+    Find the best attribute (and threshold if real) for splitting.
+    Assumes either all features are discrete or all are real.
     
     Returns:
         best_feature   : str, column name to split
-        best_threshold : float or None, threshold for continuous attribute
-        best_gain      : float, gain/variance reduction
+        best_threshold : float or None, threshold for real inputs
+        best_gain      : float, information gain or variance reduction
     """
     best_feature, best_threshold, best_gain = None, None, -1
 
-    for col in features:
+    # Check if inputs are real
+    is_real = check_ifreal(X.iloc[:, 0])
+
+    for col in X.columns:
         x_col = X[col]
 
-        if check_ifreal(x_col):
-            # Continuous attribute: compute candidate thresholds
+        if is_real:
+            # Continuous attribute → try candidate thresholds
             unique_vals = np.sort(x_col.unique())
             if len(unique_vals) <= 1:
-                continue  # nothing to split
+                continue
             thresholds = (unique_vals[:-1] + unique_vals[1:]) / 2
 
             for t in thresholds:
@@ -149,12 +152,13 @@ def opt_split_attribute(X: pd.DataFrame, y: pd.Series, criterion: str, features:
                     best_gain, best_feature, best_threshold = gain, col, t
 
         else:
-            # Discrete attribute: standard IG or variance reduction
+            # Discrete attribute
             gain = information_gain(y, x_col, criterion)
             if gain > best_gain:
                 best_gain, best_feature, best_threshold = gain, col, None
 
     return best_feature, best_threshold, best_gain
+
 
 
 
