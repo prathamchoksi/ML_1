@@ -1,71 +1,96 @@
-"""
-The current code given is for the Assignment 1.
-You will be expected to use this to make trees for:
-> discrete input, discrete output
-> real input, real output
-> real input, discrete output
-> discrete input, real output
-"""
 from dataclasses import dataclass
-from typing import Literal
-
-import numpy as np
+from typing import Literal, Any, Optional
 import pandas as pd
-import matplotlib.pyplot as plt
-from tree.utils import *
-
-np.random.seed(42)
+import numpy as np
+from utils import opt_split_attribute, split_data, check_ifreal
 
 class Node:
-    def __init__(self, is_leaf=False, prediction=None, feature=None, threshold=None, children=None):
-        self.is_leaf = is_leaf
-        self.prediction = prediction   # prediction if leaf (majority class for classification)
-        self.feature = feature         # splitting feature
-        self.threshold = threshold     # used later for real-valued splits
-        self.children = children or {} # {feature_value: Node} for discrete splits
+    def __init__(self,
+                 feature: Optional[str] = None,
+                 threshold: Optional[float] = None,
+                 children: Optional[dict] = None,
+                 value: Optional[Any] = None):
+        self.feature = feature
+        self.threshold = threshold
+        self.children = children  # dict: split_label -> Node
+        self.value = value        # leaf prediction
 
 @dataclass
 class DecisionTree:
-    criterion: Literal["information_gain", "gini_index"]  # criterion won't be used for regression
-    max_depth: int  # The maximum depth the tree can grow to
+    criterion: Literal["entropy", "gini"]  # For classification only
+    max_depth: int = 5
 
     def __init__(self, criterion, max_depth=5):
         self.criterion = criterion
         self.max_depth = max_depth
-        self.input_type = None
-        self.output_type = None
-        self.children = {}  # for the root node
+        self.root = None
+        self.is_regression = None
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> None:
-        """
-        Function to train and construct the decision tree
-        """
+        self.is_regression = check_ifreal(y)
+        self.root = self._build_tree(X, y, depth=0)
 
-        # If you wish your code can have cases for different types of input and output data (discrete, real)
-        # Use the functions from utils.py to find the optimal attribute to split upon and then construct the tree accordingly.
-        # You may(according to your implemetation) need to call functions recursively to construct the tree. 
+    def _build_tree(self, X: pd.DataFrame, y: pd.Series, depth: int) -> Node:
+        # Stop if pure or max depth reached
+        if len(y.unique()) == 1 or depth >= self.max_depth or X.empty:
+            return Node(value=self._leaf_value(y))
 
-        pass
+        # Find best split
+        features = X.columns
+        best_feature, best_threshold, best_gain = opt_split_attribute(X, y, self.criterion, features)
+
+        if best_feature is None or best_gain <= 0:
+            return Node(value=self._leaf_value(y))
+
+        # Split and recurse
+        splits = split_data(X, y, best_feature, best_threshold)
+        children = {}
+        for split_label, (X_sub, y_sub) in splits.items():
+            children[split_label] = self._build_tree(X_sub, y_sub, depth + 1)
+
+        return Node(feature=best_feature, threshold=best_threshold, children=children)
+
+    def _leaf_value(self, y: pd.Series) -> Any:
+        if self.is_regression:
+            return y.mean()
+        else:
+            return y.value_counts().idxmax()
 
     def predict(self, X: pd.DataFrame) -> pd.Series:
-        """
-        Funtion to run the decision tree on test inputs
-        """
+        return X.apply(lambda row: self._predict_one(row, self.root), axis=1)
 
-        # Traverse the tree you constructed to return the predicted values for the given test inputs.
-
-        pass
+    def _predict_one(self, row: pd.Series, node: Node):
+        if node.value is not None:
+            return node.value
+        if node.threshold is not None:
+            # Continuous feature
+            if row[node.feature] <= node.threshold:
+                return self._predict_one(row, node.children[f"<= {node.threshold}"])
+            else:
+                return self._predict_one(row, node.children[f"> {node.threshold}"])
+        else:
+            # Discrete feature
+            val = row[node.feature]
+            if val in node.children:
+                return self._predict_one(row, node.children[val])
+            else:
+                return None  # unseen category
 
     def plot(self) -> None:
-        """
-        Function to plot the tree
+        self._plot_node(self.root, depth=0)
 
-        Output Example:
-        ?(X1 > 4)
-            Y: ?(X2 > 7)
-                Y: Class A
-                N: Class B
-            N: Class C
-        Where Y => Yes and N => No
-        """
-        pass
+    def _plot_node(self, node: Node, depth: int):
+        indent = "    " * depth
+        if node.value is not None:
+            print(f"{indent}Predict -> {node.value}")
+        elif node.threshold is not None:
+            print(f"{indent}?( {node.feature} <= {node.threshold} )")
+            print(f"{indent}Y:")
+            self._plot_node(node.children[f"<= {node.threshold}"], depth + 1)
+            print(f"{indent}N:")
+            self._plot_node(node.children[f"> {node.threshold}"], depth + 1)
+        else:
+            print(f"{indent}Split on {node.feature}")
+            for val, child in node.children.items():
+                print(f"{indent}{val}:")
+                self._plot_node(child, depth + 1)
